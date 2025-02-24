@@ -7,7 +7,6 @@ import torch.nn.functional as F
 import os
 import numba
 from tqdm import tqdm
-# from torch_sparse import coalesce
 import torch_geometric.transforms as T
 from torch_geometric.datasets import Planetoid, WikipediaNetwork, Actor, WebKB, Amazon, Coauthor, WikiCS
 from torch_geometric.utils import remove_self_loops
@@ -22,7 +21,6 @@ def get_split(num_samples: int, train_ratio: float = 0.1, test_ratio: float = 0.
     assert train_ratio + test_ratio < 1
     train_size = int(num_samples * train_ratio)
     test_size = int(num_samples * test_ratio)
-
     trains, vals, tests = [], [], []
 
     for _ in range(num_splits):
@@ -50,19 +48,15 @@ def get_split(num_samples: int, train_ratio: float = 0.1, test_ratio: float = 0.
 
     return train_mask_all, val_mask_all, test_mask_all
 
+
 def split_masks(train_mask, val_mask, test_mask):
-    """
-    将 10*节点数量 的掩码矩阵拆分为 10 个 1*节点数量 的掩码向量
-    """
     train_masks = [train_mask[i] for i in range(train_mask.size(0))]
     val_masks = [val_mask[i] for i in range(val_mask.size(0))]
     test_masks = [test_mask[i] for i in range(test_mask.size(0))]
-
     return train_masks, val_masks, test_masks
 
 
 def sparse_mx_to_torch_sparse_tensor(sparse_mx):
-    """将 Scipy 稀疏矩阵转换为 PyTorch 稀疏张量"""
     sparse_mx = sparse_mx.tocoo()
     indices = torch.from_numpy(
         np.vstack((sparse_mx.row, sparse_mx.col)).astype(np.int64)
@@ -72,140 +66,59 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     return torch.sparse_coo_tensor(indices, values, shape)
 
 
-# def get_structural_encoding(edges, nnodes, str_enc_dim=16):
-#
-#     row = edges[0, :].numpy()
-#     col = edges[1, :].numpy()
-#     data = np.ones_like(row)
-#
-#     A = sp.csr_matrix((data, (row, col)), shape=(nnodes, nnodes))
-#     D = (np.array(A.sum(1)).squeeze()) ** -1.0
-#
-#     Dinv = sp.diags(D)
-#     RW = A * Dinv
-#     M = RW
-#
-#     SE = [torch.from_numpy(M.diagonal()).float()]
-#     M_power = M
-#     for _ in range(str_enc_dim - 1):
-#         M_power = M_power * M
-#         SE.append(torch.from_numpy(M_power.diagonal()).float())
-#     SE = torch.stack(SE, dim=-1)
-#     return SE
-
 def get_structural_encoding(edges, nnodes, str_enc_dim=20):
     row = edges[0, :].numpy()
     col = edges[1, :].numpy()
     data = np.ones_like(row)
     A = sp.csr_matrix((data, (row, col)), shape=(nnodes, nnodes))
-
     D = sp.diags(np.array(A.sum(1)).flatten())
-
     L = D - A
-
-    # Compute the first k eigenvectors of the Laplacian matrix
-    _, eigenvectors = eigsh(L, k=str_enc_dim, which='SM', maxiter=50000)
-
-    # Convert eigenvectors to a PyTorch tensor
     SE = torch.from_numpy(eigenvectors).float()
-
     return SE
 
 
-# def create_W(features, scale=16):
-#
-#     N = features.shape[0]
-#     K = np.zeros((N, N))
-#
-#     for i in range(N):
-#         for j in range(N):
-#             K[i, j] += np.linalg.norm(features[i] - features[j], ord=2) / scale
-#     return K
-
 def create_W(features, scale=16):
     features = torch.tensor(features, dtype=torch.float32)
-
-    # 计算欧氏距离矩阵（L2 范数）
     distances = torch.cdist(features, features, p=2)
-
-    # 对距离矩阵进行缩放
     K = distances / scale
-
-    # 转回 NumPy 数组
     return K.numpy()
-
-# def op_tmp(adj, K):
-#     L = adj.shape[0]
-#     # print('adj:', adj.type(), adj.shape)
-#     # adj = adj.to_sparse()
-#     adj_2 = adj @ adj
-#     N, M = np.zeros_like(adj), np.zeros_like(adj)
-#     for i in range(L):
-#         for j in range(L):
-#             sum_s_jf_2 = 0
-#             sum_s_jf_Cf = 0
-#             for f in range(L):
-#                 C_f = adj_2[i, f] - adj[j, f] * adj[i, j] - adj[i, f]
-#                 if f != j:
-#                     sum_s_jf_2 += adj[j][f] ** 2
-#                     sum_s_jf_Cf += adj[j][f] * C_f
-#             s_ij_N = 2 * adj_2[i, j] - K[i, j] - 2 * sum_s_jf_Cf
-#             s_ij_M = 4 + 2 * sum_s_jf_2
-#             N[i, j] = s_ij_N
-#             M[i, j] = s_ij_M
-#
-#     return N, M
 
 
 def op_tmp(adj, K):
-    # print('adj:', adj, adj.shape, adj.type())
-    # print('K:', K, K.shape, K.dtype)
     L = adj.shape[0]
-    adj_2 = adj @ adj  # 矩阵乘法
+    adj_2 = adj @ adj  
     N = torch.zeros((L, L))
     M = torch.zeros((L, L))
 
-    # 计算 sum_s_jf_2 和 sum_s_jf_Cf
     for i in range(L):
         for j in range(L):
-            # 计算 C_f
             C_f = adj_2[i, :] - adj[j, :] * adj[i, j] - adj[i, :]
-            sum_s_jf_2 = torch.sum(adj[j, :] ** 2) - adj[j, j] ** 2  # 避免 f == j
+            sum_s_jf_2 = torch.sum(adj[j, :] ** 2) - adj[j, j] ** 2  
             sum_s_jf_Cf = torch.sum(adj[j, :] * C_f) - adj[j, j] * C_f[j]
 
             s_ij_N = 2 * adj_2[i, j] - K[i, j] - 2 * sum_s_jf_Cf
             s_ij_M = 4 + 2 * sum_s_jf_2
             N[i, j] = s_ij_N
             M[i, j] = s_ij_M
-
+            
     return N, M
 
 def normalize_matrix(adj, eps=1e-12):
-
     D = torch.sum(adj, dim=1) + eps
-
     D = torch.pow(D, -0.5)
     D[torch.isinf(D)] = 0
     D[torch.isnan(D)] = 0
     D = torch.diag(D)
     adj = torch.matmul(torch.matmul(D, adj), D)
-
     return adj
 
 def compute_NM(X, A):
     I = np.eye(A.shape[0])
     A = A.to_dense()
     A = A + I
-    A = normalize_matrix(A) #归一化,same as ora
-    # print('A:', A, A.shape, A.dtype)
-    K = create_W(X) #same as ora
-    # print('K:', K, K.shape, K.dtype)
-
-    N, M = op_tmp(A, K) #M is not same as ora
-    # print('N:', N, N.shape, N.type())
-    # print('M:', M, M.shape, M.type())
-
-
+    A = normalize_matrix(A)
+    K = create_W(X) 
+    N, M = op_tmp(A, K) 
     return N, M
 
 class lambda_2(nn.Module):
@@ -225,25 +138,13 @@ class lambda_2(nn.Module):
 def optimize_lbd2(N_i, M_i, epochs=10000, learning_rate=1e-4, convengence=1e-16):
 
     N_ii = N_i.cuda()
-    # seed = 666666
-    #
-    # torch.manual_seed(seed)
-    # torch.cuda.manual_seed_all(seed)
-    # np.random.seed(seed)
-    # random.seed(seed)
-
-    # N_ii = N_ii.cuda()
     M_ii = M_i.cuda()
     model = lambda_2().cuda()
-    # device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-    # model.to(device)
-    # model.reset_parameter()
     optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
     loss_last = torch.zeros(1).cuda()
     for epoch in range(epochs):
         optimizer.zero_grad()
         obj = model(N_ii, M_ii)
-        # print(obj.sum())
         loss = 10 * torch.square(obj - 1)
         if torch.abs_(loss_last - loss) < convengence * loss_last:
             break
@@ -251,7 +152,6 @@ def optimize_lbd2(N_i, M_i, epochs=10000, learning_rate=1e-4, convengence=1e-16)
             loss_last = loss.clone()
         loss.backward()
         optimizer.step()
-
         return F.relu(model.lbd).item()
 
 def op_S( lb2, N, M):
@@ -260,7 +160,6 @@ def op_S( lb2, N, M):
     return S.T
 
 def compute_A_bar(N, M):
-    # S = np.zeros_like(N)
     lb2 = []
     print('N:', N.t)
     for i in tqdm(range(N.shape[0])):
@@ -268,7 +167,6 @@ def compute_A_bar(N, M):
         lb2.append(lb)
     lb2 = np.array(lb2)
     S = op_S(lb2, N, M)
-    # np.save("./S_{}.npy".format(dataname), S)
     return S
 
 def A_final(S, nbs=50.0):
@@ -279,7 +177,6 @@ def A_final(S, nbs=50.0):
     S = S.T + S
     S[S >= 1] = 1
     S[S < 1] = 0
-
     return S
 
 def homophily_v2(A, labels, ignore_negative=False) :
