@@ -23,17 +23,14 @@ from dgl.nn.pytorch.conv import GraphConv
 class GCL(nn.Module):
     def __init__(self, nlayers, nlayers_proj, in_dim, emb_dim, proj_dim, dropout, sparse, batch_size):
         super(GCL, self).__init__()
-
         self.encoder1 = SGC(nlayers, in_dim, emb_dim, dropout, sparse)
         self.encoder2 = SGC(nlayers, in_dim, emb_dim, dropout, sparse)
-
         if nlayers_proj == 1:
             self.proj_head1 = Sequential(Linear(emb_dim, proj_dim))
             self.proj_head2 = Sequential(Linear(emb_dim, proj_dim))
         elif nlayers_proj == 2:
             self.proj_head1 = Sequential(Linear(emb_dim, proj_dim), ReLU(inplace=True), Linear(proj_dim, proj_dim))
             self.proj_head2 = Sequential(Linear(emb_dim, proj_dim), ReLU(inplace=True), Linear(proj_dim, proj_dim))
-
         self.batch_size = batch_size
 
 
@@ -127,35 +124,23 @@ class lambda_2(nn.Module):
         self.lbd = nn.Parameter(torch.Tensor(1))
         self.reset_parameter()
 
+    
     def reset_parameter(self):
         self.lbd.data.fill_(1e-3)
 
+    
     def forward(self, N_i, M_i):
         Lbd = F.relu(self.lbd)
         obj = F.relu((N_i + Lbd) / M_i)
         return obj.sum()
 
-class GCN(nn.Module):
-    def __init__(self, in_feats, hidden_feats, out_feats, dropout_rate=0.5):
-        super(GCN, self).__init__()
-        self.conv1 = GraphConv(in_feats, hidden_feats, activation=F.relu)
-        self.conv2 = GraphConv(hidden_feats, out_feats, activation=F.relu)
-        self.dropout = nn.Dropout(dropout_rate)
-
-    def forward(self, g, features):
-        h = self.conv1(g, features)
-        h = self.dropout(h)
-        h = self.conv2(g, h)
-        return h
 
 class Edge_Discriminator(nn.Module):
     def __init__(self, nnodes, adj, adj_two_order, input_dim, alpha, sparse, dataset_name, hidden_dim=128, temperature=1.0, bias=0.0 + 0.0001):
         super(Edge_Discriminator, self).__init__()
-
         self.embedding_layers = nn.ModuleList()
         self.embedding_layers.append(nn.Linear(input_dim, hidden_dim))
         self.edge_mlp = nn.Linear(hidden_dim * 2, 1)
-        # self.gcn = GCN(input_dim, hidden_dim, hidden_dim)
         self.temperature = temperature
         self.bias = bias
         self.nnodes = nnodes
@@ -165,50 +150,28 @@ class Edge_Discriminator(nn.Module):
         self.alpha = alpha
         self.dataset_name = dataset_name
 
-
+    
     def get_node_embedding(self, h):
         for layer in self.embedding_layers:
             h = layer(h)
             h = F.relu(h)
         return h
 
-    # def get_node_embedding(self, features):
-    #     #best
-    #     g = dgl.graph((self.adj.nonzero(as_tuple=True)))
-    #     g = dgl.add_self_loop(g)
-    #     g = g.to(features.device)
-    #     h = self.gcn(g, features)
-    #     return h
-
+    
     def get_adj_2_edges(self, adj, adj_two_order, alpha=0.5):
         adj_1 = adj
-        # adj_two_order = adj_two_order - torch.eye(adj_two_order.shape[0])
-        # adj_1 = adj_1.to_dense()
-        # print('adj_1:', adj_1, adj_1.nonzero().shape)
-        # print('adj_two_order:', adj_two_order, adj_two_order.nonzero().shape)
         adj_combined = (1 - alpha) * adj_1 + alpha * adj_two_order
-        #[585,2]
-        # print('adj_combined:', adj_combined, adj_combined.nonzero().shape)
         second_order_edges_indices = torch.nonzero(adj_combined).t()
         edges_2 = torch.zeros((2, len(second_order_edges_indices[0])), dtype=torch.long).cuda()
         edges_2[:, :second_order_edges_indices.shape[1]] = second_order_edges_indices
-        # edges_2 = remove_self_loops(edges_2)[0]
-        # print('edges_2:', edges_2, len(edges_2[0]))
-
         return edges_2
 
 
 
     def get_edge_weight(self, embeddings, edges):
-        #best
         s1 = torch.sum(embeddings[edges[0]] * embeddings[edges[1]], dim=1)
         s2 = torch.sum(embeddings[edges[1]] * embeddings[edges[0]], dim=1)
         return (s1 + s2) / 2
-
-    # def get_edge_weight(self, embeddings, edges):
-    #     s1 = self.edge_mlp(torch.cat((embeddings[edges[0]], embeddings[edges[1]]), dim=1)).flatten()
-    #     s2 = self.edge_mlp(torch.cat((embeddings[edges[1]], embeddings[edges[0]]), dim=1)).flatten()
-    #     return (s1 + s2) / 2
 
 
     def gumbel_sampling(self, edges_weights_raw):
@@ -219,83 +182,48 @@ class Edge_Discriminator(nn.Module):
         return torch.sigmoid(gate_inputs).squeeze()
 
 
-    # def merge_edge_weights(self, edges_1_index, edges_1_weights_raw, edges_2_index, edges_2_weights_raw, alpha=0.5):
-    #     from collections import defaultdict
-    #     merged_weights = defaultdict(float)
-    #
-    #     for idx, (edge_index, edge_weights) in enumerate(
-    #             [(edges_1_index, edges_1_weights_raw), (edges_2_index, edges_2_weights_raw)]):
-    #         weight_factor = alpha if idx == 0 else (1 - alpha)
-    #         for i in range(edge_index.size(1)):
-    #             row = edge_index[0, i].item()
-    #             col = edge_index[1, i].item()
-    #             merged_weights[(row, col)] += edge_weights[i].item() * weight_factor
-    #             # merged_weights[(row, col)] += edge_weights[i].item()
-    #     merge_edge_index = torch.tensor(list(merged_weights.keys()), dtype=torch.long).t().cuda()
-    #     merged_edge_weights = torch.tensor(list(merged_weights.values()), dtype=torch.float).cuda()
-    #     # print('merge_edge_index:', merge_edge_index, merge_edge_index.shape)
-    #     # print('merged_edge_weights:', merged_edge_weights, merged_edge_weights.shape)
-    #     return merged_edge_weights
-
     def merge_edge_weights(self, edges_1_index, edges_1_weights_raw, edges_2_index, edges_2_weights_raw, alpha=0.5):
-        # 转换为 NumPy 或 CuPy 数组
         edges_1_index_np = edges_1_index.cpu().numpy()
         edges_1_weights_np = edges_1_weights_raw.cpu().detach().numpy()
         edges_2_index_np = edges_2_index.cpu().numpy()
         edges_2_weights_np = edges_2_weights_raw.cpu().detach().numpy()
-
-        # 使用向量化计算
         merged_weights_dict = {}
 
         for edge_index, edge_weights, weight_factor in [
             (edges_1_index_np, edges_1_weights_np, alpha),
             (edges_2_index_np, edges_2_weights_np, 1 - alpha)]:
-
-            # 获取边的坐标
             rows, cols = edge_index[0], edge_index[1]
 
-            # 合并权重
             for row, col, weight in zip(rows, cols, edge_weights):
                 key = (row, col)
                 merged_weights_dict[key] = merged_weights_dict.get(key, 0) + weight #* weight_factor
-
-        # 转换合并结果为张量
+                
         merge_edge_index = torch.tensor(list(merged_weights_dict.keys()), dtype=torch.long).t().cuda()
         merged_edge_weights = torch.tensor(list(merged_weights_dict.values()), dtype=torch.float).cuda()
-        # print('merged_edge_weights:', merged_edge_weights, merged_edge_weights.shape)
         return merged_edge_weights
+
+    
     def weight_forward(self, features, adj, adj_two_order):
         embeddings = self.get_node_embedding(features)
         edges_2 = self.get_adj_2_edges(adj, adj_two_order)
         edges_1_index, edges_1_attr = from_scipy_sparse_matrix(csr_matrix(adj))
-        # print('edges_1_index:', edges_1_index, edges_1_index.shape)
         edges_2_index, edges_2_attr = from_scipy_sparse_matrix(csr_matrix(adj_two_order))
-        # print('edges_2_index:', edges_2_index, edges_2_index.shape)
         edges_1_weights_raw = self.get_edge_weight(embeddings, edges_1_index).cuda()
-        # print('edges_1_weights_raw:', edges_1_weights_raw, edges_1_weights_raw.shape)
         edges_2_weights_raw = self.get_edge_weight(embeddings, edges_2_index).cuda()
-        # print('edges_2_weights_raw:', edges_2_weights_raw, edges_2_weights_raw.shape)
         edges_weights_raw = self.merge_edge_weights(edges_1_index, edges_1_weights_raw, edges_2_index, edges_2_weights_raw)
-        # print('edges_weights_raw:', edges_weights_raw, edges_weights_raw.nonzero().shape)
         weights_lp = self.gumbel_sampling(edges_weights_raw)
-        #[379,1]
-        # print('weights_lp:', weights_lp, weights_lp.shape, weights_lp.nonzero().shape)
         weights_hp = 1 - weights_lp
-        # print('weights_hp:', weights_hp, weights_hp.shape)
         return weights_lp, weights_hp, edges_2
-#这里的输出是矩阵，看看怎么转换为索引和向量
+
+    
     def weight_to_adj(self, edges, weights_lp, weights_hp):
         if not self.sparse:
             adj_lp = get_adj_from_edges(edges, weights_lp, self.nnodes)
-            #[379,2]
-            # print('adj_lp:', adj_lp, adj_lp.nonzero().shape)
             adj_lp += torch.eye(self.nnodes).cuda()
             adj_lp = normalize_adj(adj_lp, 'sym', self.sparse)
-
             adj_hp = get_adj_from_edges(edges, weights_hp, self.nnodes)
             adj_hp += torch.eye(self.nnodes).cuda()
             adj_hp = normalize_adj(adj_hp, 'sym', self.sparse)
-
             mask = torch.zeros(adj_lp.shape).cuda()
             mask[edges[0], edges[1]] = 1.
             mask.requires_grad = False
@@ -306,7 +234,6 @@ class Edge_Discriminator(nn.Module):
             weights_lp = torch.cat((weights_lp, torch.ones(self.nnodes).cuda())) + EOS
             weights_lp = norm(adj_lp, weights_lp)
             adj_lp.edata['w'] = weights_lp
-
             adj_hp = dgl.graph((edges[0], edges[1]), num_nodes=self.nnodes, device='cuda')
             adj_hp = dgl.add_self_loop(adj_hp)
             weights_hp = torch.cat((weights_hp, torch.ones(self.nnodes).cuda())) + EOS
@@ -314,18 +241,12 @@ class Edge_Discriminator(nn.Module):
             weights_hp *= - self.alpha
             weights_hp[edges.shape[1]:] = 1
             adj_hp.edata['w'] = weights_hp
-
-        # print('adj_lp:', adj_lp, adj_lp.nonzero().shape)
-        # print('adj_hp:', adj_hp, adj_hp.nonzero().shape)
         return adj_lp, adj_hp
 
 
     def forward(self, features, edges, adj, adj_two_order):
         weights_lp, weights_hp, edges_2 = self.weight_forward(features, adj, adj_two_order)
-        # second_order_edges = self.get_adj_2_edges(adj_two_order)
         adj_lp, adj_hp = self.weight_to_adj(edges_2, weights_lp, weights_hp)
-        # print('adj_lp:', adj_lp, adj_hp.nonzero().shape)
-        # print('adj_hp:', adj_hp, adj_hp.nonzero().shape)
         return adj_lp, adj_hp, weights_lp, weights_hp, edges_2
 
 
@@ -335,10 +256,10 @@ class SGC(nn.Module):
         super(SGC, self).__init__()
         self.dropout = dropout
         self.sparse = sparse
-
         self.linear = nn.Linear(in_dim, emb_dim)
         self.k = nlayers
 
+    
     def forward(self, x, g):
         x = torch.relu(self.linear(x))
 
