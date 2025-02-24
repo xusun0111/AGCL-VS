@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import dgl
 import random
 import time
-from data_loader import load_data
+from dataset_load import load_data
 from model import *
 from utils import *
 
