@@ -17,7 +17,6 @@ warnings.simplefilter("ignore")
 
 
 def get_split(num_samples: int, train_ratio: float = 0.1, test_ratio: float = 0.8, num_splits: int = 10):
-
     assert train_ratio + test_ratio < 1
     train_size = int(num_samples * train_ratio)
     test_size = int(num_samples * test_ratio)
@@ -25,19 +24,15 @@ def get_split(num_samples: int, train_ratio: float = 0.1, test_ratio: float = 0.
 
     for _ in range(num_splits):
         indices = torch.randperm(num_samples)
-
         train_mask = torch.zeros(num_samples, dtype=torch.bool)
         train_mask.fill_(False)
         train_mask[indices[:train_size]] = True
-
         test_mask = torch.zeros(num_samples, dtype=torch.bool)
         test_mask.fill_(False)
         test_mask[indices[train_size: test_size + train_size]] = True
-
         val_mask = torch.zeros(num_samples, dtype=torch.bool)
         val_mask.fill_(False)
         val_mask[indices[test_size + train_size:]] = True
-
         trains.append(train_mask.unsqueeze(1))
         vals.append(val_mask.unsqueeze(1))
         tests.append(test_mask.unsqueeze(1))
@@ -45,7 +40,6 @@ def get_split(num_samples: int, train_ratio: float = 0.1, test_ratio: float = 0.
     train_mask_all = torch.cat(trains, 1)
     val_mask_all = torch.cat(vals, 1)
     test_mask_all = torch.cat(tests, 1)
-
     return train_mask_all, val_mask_all, test_mask_all
 
 
@@ -95,12 +89,10 @@ def op_tmp(adj, K):
             C_f = adj_2[i, :] - adj[j, :] * adj[i, j] - adj[i, :]
             sum_s_jf_2 = torch.sum(adj[j, :] ** 2) - adj[j, j] ** 2  
             sum_s_jf_Cf = torch.sum(adj[j, :] * C_f) - adj[j, j] * C_f[j]
-
             s_ij_N = 2 * adj_2[i, j] - K[i, j] - 2 * sum_s_jf_Cf
             s_ij_M = 4 + 2 * sum_s_jf_2
             N[i, j] = s_ij_N
             M[i, j] = s_ij_M
-            
     return N, M
 
 def normalize_matrix(adj, eps=1e-12):
@@ -136,7 +128,6 @@ class lambda_2(nn.Module):
         return obj.sum()
 
 def optimize_lbd2(N_i, M_i, epochs=10000, learning_rate=1e-4, convengence=1e-16):
-
     N_ii = N_i.cuda()
     M_ii = M_i.cuda()
     model = lambda_2().cuda()
@@ -170,7 +161,6 @@ def compute_A_bar(N, M):
     return S
 
 def A_final(S, nbs=50.0):
-
     S[S < (1 / nbs)] = 0
     S[S >= (1 / nbs)] = 1
     S[S > 0] = 1
@@ -180,12 +170,6 @@ def A_final(S, nbs=50.0):
     return S
 
 def homophily_v2(A, labels, ignore_negative=False) :
-    """ gives edge homophily, i.e. proportion of edges that are intra-class
-    compute homophily of classes in labels vector
-    See Zhu et al. 2020 "Beyond Homophily ..."
-    if ignore_negative = True, then only compute for edges where nodes both have
-        nonnegative class labels (negative class labels are treated as missing
-    """
     A = A.to_dense().cpu().numpy() if A.is_sparse else A.cpu().numpy()
     labels = labels.cpu().numpy()
     src_node, targ_node = np.nonzero(A)
@@ -219,7 +203,6 @@ def load_data(dataset_name):
         dataset = WikiCS(path)
 
     data = dataset[0]
-    # edges = data.edge_index
     edges = remove_self_loops(data.edge_index)[0]
     adj = to_scipy_sparse_matrix(edges, num_nodes=data.x.size(0)).tocoo()
     adj = sparse_mx_to_torch_sparse_tensor(adj)
@@ -258,31 +241,10 @@ def load_data(dataset_name):
         lb2 = np.array(lb2)
         S = op_S(lb2, N, M)
         adj_two_order = A_final(S)
-        print("homophily_ora:", homophily_v2(adj, labels))  # ! 0.8137
+        print("homophily_ora:", homophily_v2(adj, labels)) 
         print("homophily_two_order", homophily_v2(adj_two_order, labels))
-        # 372 is the right number
-        # print('adj_two_order:', adj_two_order, adj_two_order.nonzero().shape)
         torch.save(adj_two_order, file_name)
         print('Done. The structural encoding is saved as: {}.'.format(file_name))
-
-    # print("Computing similarity matrix S...")
-    # N, M = compute_NM(features, adj)
-    # lb2 = []
-    # for i in tqdm(range(N.shape[0])):
-    #     lb = optimize_lbd2(N[i], M[i])
-    #     lb2.append(lb)
-    # lb2 = np.array(lb2)
-    # S = op_S(lb2, N, M)
-    # # print('S', S.sum())
-    # adj_two_order = A_final(S)
-    # # print('adj_two_order:', adj_two_order, adj_two_order.shape)
-    # # print('labels:', labels.type())
-    # # print("homophily_ora:", homophily_v2(adj, labels))  # ! 0.8137
-    # #
-    # # print("homophily_two_order", homophily_v2(adj_two_order, labels))
-    # # print('adj_2:', adj_2, adj_2.shape, adj_2.dtype, adj_2.nonzero().shape)
-    # print("Done.")
-
 
     path = '../data_mono/se/{}'.format(dataset_name)
     if not os.path.exists(path):
@@ -290,21 +252,11 @@ def load_data(dataset_name):
     file_name = path + '/{}_{}.pt'.format(dataset_name, 16)
     if os.path.exists(file_name):
         se = torch.load(file_name)
-        # print('Load exist structural encoding.')
     else:
         print('Computing structural encoding...')
         se = get_structural_encoding(edges, nnodes)
         torch.save(se, file_name)
         print('Done. The structural encoding is saved as: {}.'.format(file_name))
-
-    # edges = remove_self_loops(data.edge_index)[0]
-    #309
-    # print('edges:', edges, edges.shape, edges.dtype)
-    # adj = to_scipy_sparse_matrix(edges, num_nodes=data.x.size(0)).tocoo()
-    # # print('adj:', adj, adj.shape, adj.dtype)
-    # adj = sparse_mx_to_torch_sparse_tensor(adj)
-    adj = adj.to_dense()
-    # print('adj', adj, adj.nonzero().shape)
 
     return features, edges, se, train_mask, val_mask, test_mask, labels, nnodes, nfeats, adj, adj_two_order
 
