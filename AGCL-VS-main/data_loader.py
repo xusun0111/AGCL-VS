@@ -95,6 +95,7 @@ def op_tmp(adj, K):
             M[i, j] = s_ij_M
     return N, M
 
+
 def normalize_matrix(adj, eps=1e-12):
     D = torch.sum(adj, dim=1) + eps
     D = torch.pow(D, -0.5)
@@ -104,6 +105,7 @@ def normalize_matrix(adj, eps=1e-12):
     adj = torch.matmul(torch.matmul(D, adj), D)
     return adj
 
+
 def compute_NM(X, A):
     I = np.eye(A.shape[0])
     A = A.to_dense()
@@ -112,6 +114,7 @@ def compute_NM(X, A):
     K = create_W(X) 
     N, M = op_tmp(A, K) 
     return N, M
+
 
 class lambda_2(nn.Module):
     def __init__(self):
@@ -126,6 +129,7 @@ class lambda_2(nn.Module):
         Lbd = F.relu(self.lbd)
         obj = F.relu((N_i + Lbd)/M_i)
         return obj.sum()
+
 
 def optimize_lbd2(N_i, M_i, epochs=10000, learning_rate=1e-4, convengence=1e-16):
     N_ii = N_i.cuda()
@@ -145,10 +149,12 @@ def optimize_lbd2(N_i, M_i, epochs=10000, learning_rate=1e-4, convengence=1e-16)
         optimizer.step()
         return F.relu(model.lbd).item()
 
+
 def op_S( lb2, N, M):
     S = (N.T + lb2) / M.T
     S[S < 0] = 0
     return S.T
+
 
 def compute_A_bar(N, M):
     lb2 = []
@@ -160,6 +166,7 @@ def compute_A_bar(N, M):
     S = op_S(lb2, N, M)
     return S
 
+
 def A_final(S, nbs=50.0):
     S[S < (1 / nbs)] = 0
     S[S >= (1 / nbs)] = 1
@@ -168,6 +175,7 @@ def A_final(S, nbs=50.0):
     S[S >= 1] = 1
     S[S < 1] = 0
     return S
+
 
 def homophily_v2(A, labels, ignore_negative=False) :
     A = A.to_dense().cpu().numpy() if A.is_sparse else A.cpu().numpy()
@@ -180,6 +188,7 @@ def homophily_v2(A, labels, ignore_negative=False) :
     else:
         edge_hom = np.mean(matching)
     return edge_hom
+
 
 def load_data(dataset_name):
 
