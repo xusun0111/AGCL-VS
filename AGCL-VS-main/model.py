@@ -135,9 +135,9 @@ class lambda_2(nn.Module):
         return obj.sum()
 
 
-class Edge_edge_separator(nn.Module):
+class Graph_edge_separator(nn.Module):
     def __init__(self, nnodes, adj, adj_two_order, input_dim, alpha, sparse, dataset_name, hidden_dim=128, temperature=1.0, bias=0.0 + 0.0001):
-        super(Edge_edge_separator, self).__init__()
+        super(Graph_edge_separator, self).__init__()
         self.embedding_layers = nn.ModuleList()
         self.embedding_layers.append(nn.Linear(input_dim, hidden_dim))
         self.edge_mlp = nn.Linear(hidden_dim * 2, 1)
