@@ -60,7 +60,7 @@ def sparse_mx_to_torch_sparse_tensor(sparse_mx):
     return torch.sparse_coo_tensor(indices, values, shape)
 
 
-def get_structural_encoding(edges, nnodes, str_enc_dim=20):
+def get_structural_encoding(edges, nnodes, str_enc_dim=16):
     row = edges[0, :].numpy()
     col = edges[1, :].numpy()
     data = np.ones_like(row)
@@ -190,7 +190,7 @@ def homophily_v2(A, labels, ignore_negative=False) :
     return edge_hom
 
 
-def load_data(dataset_name):
+def load_dataset(dataset_name):
 
     path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '.', 'data', dataset_name)
 
