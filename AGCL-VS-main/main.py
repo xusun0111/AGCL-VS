@@ -66,7 +66,7 @@ def main(args):
         cl_model = DC_contrastive(nlayers=args.nlayers_enc, nlayers_proj=args.nlayers_proj, in_dim=nfeats, emb_dim=args.emb_dim,
                     proj_dim=args.proj_dim, dropout=args.dropout, sparse=args.sparse, batch_size=args.cl_batch_size).cuda()
         cl_model.set_mask_knn(features.cpu(), k=args.k, dataset=args.dataset)
-        edge_separator = Edge_edge_separator(nnodes, adj, adj_two_order, nfeats + str_encodings.shape[1], args.alpha, args.sparse, dataset_name=args.dataset).cuda()
+        edge_separator = Graph_edge_separator(nnodes, adj, adj_two_order, nfeats + str_encodings.shape[1], args.alpha, args.sparse, dataset_name=args.dataset).cuda()
         optimizer_cl = torch.optim.Adam(cl_model.parameters(), lr=args.lr_dc_contrastive, weight_decay=args.w_decay)
         optimizer_edge_separator = torch.optim.Adam(edge_separator.parameters(), lr=args.lr_disc, weight_decay=args.w_decay)
         features = features.cuda()
