@@ -5,7 +5,7 @@ import torch.nn.functional as F
 import dgl
 import random
 import time
-from dataset_load import load_data
+from dataset_load import load_dataset
 from model import *
 from utils import *
 
@@ -22,10 +22,10 @@ def setup_seed(seed):
     dgl.random.seed(seed)
 
 
-def train_cl(cl_model, discriminator, optimizer_cl, features, str_encodings, edges, adj, adj_two_order):
+def train_cl(cl_model, edge_separator, optimizer_cl, features, str_encodings, edges, adj, adj_two_order):
     cl_model.train()
-    discriminator.eval()
-    adj_1, adj_2, weights_lp, _, second_order_neighbors = discriminator(torch.cat((features, str_encodings), 1), edges, adj, adj_two_order)
+    edge_separator.eval()
+    adj_1, adj_2, weights_lp, _, second_order_neighbors = edge_separator(torch.cat((features, str_encodings), 1), edges, adj, adj_two_order)
     features_1, adj_1, features_2, adj_2 = augmentation(features, adj_1, features, adj_2, args, cl_model.training)
     cl_loss = cl_model(features_1, adj_1, features_2, adj_2)
     optimizer_cl.zero_grad()
@@ -34,10 +34,10 @@ def train_cl(cl_model, discriminator, optimizer_cl, features, str_encodings, edg
     return cl_loss.item()
 
 
-def train_discriminator(cl_model, discriminator, optimizer_disc, features, str_encodings, edges, adj, adj_two_order, args):
+def train_edge_separator(cl_model, edge_separator, optimizer_disc, features, str_encodings, edges, adj, adj_two_order, args):
     cl_model.eval()
-    discriminator.train()
-    adj_1, adj_2, weights_lp, weights_hp, second_order_neighbors = discriminator(torch.cat((features, str_encodings), 1), edges, adj, adj_two_order)
+    edge_separator.train()
+    adj_1, adj_2, weights_lp, weights_hp, second_order_neighbors = edge_separator(torch.cat((features, str_encodings), 1), edges, adj, adj_two_order)
     rand_np = generate_random_node_pairs(features.shape[0], second_order_neighbors.shape[1])
     psu_label = torch.ones(second_order_neighbors.shape[1]).cuda()
     embedding = cl_model.get_embedding(features, adj_1, adj_2)
@@ -58,17 +58,17 @@ def train_discriminator(cl_model, discriminator, optimizer_disc, features, str_e
 def main(args):
     start_time = time.time()
     setup_seed(0)
-    features, edges, str_encodings, train_mask, val_mask, test_mask, labels, nnodes, nfeats, adj, adj_two_order = load_data(args.dataset)
+    features, edges, str_encodings, train_mask, val_mask, test_mask, labels, nnodes, nfeats, adj, adj_two_order = load_dataset(args.dataset)
     results = []
 
     for trial in range(args.ntrials):
         setup_seed(trial)
-        cl_model = GCL(nlayers=args.nlayers_enc, nlayers_proj=args.nlayers_proj, in_dim=nfeats, emb_dim=args.emb_dim,
+        cl_model = DC_contrastive(nlayers=args.nlayers_enc, nlayers_proj=args.nlayers_proj, in_dim=nfeats, emb_dim=args.emb_dim,
                     proj_dim=args.proj_dim, dropout=args.dropout, sparse=args.sparse, batch_size=args.cl_batch_size).cuda()
         cl_model.set_mask_knn(features.cpu(), k=args.k, dataset=args.dataset)
-        discriminator = Edge_Discriminator(nnodes, adj, adj_two_order, nfeats + str_encodings.shape[1], args.alpha, args.sparse, dataset_name=args.dataset).cuda()
-        optimizer_cl = torch.optim.Adam(cl_model.parameters(), lr=args.lr_gcl, weight_decay=args.w_decay)
-        optimizer_discriminator = torch.optim.Adam(discriminator.parameters(), lr=args.lr_disc, weight_decay=args.w_decay)
+        edge_separator = Edge_edge_separator(nnodes, adj, adj_two_order, nfeats + str_encodings.shape[1], args.alpha, args.sparse, dataset_name=args.dataset).cuda()
+        optimizer_cl = torch.optim.Adam(cl_model.parameters(), lr=args.lr_dc_contrastive, weight_decay=args.w_decay)
+        optimizer_edge_separator = torch.optim.Adam(edge_separator.parameters(), lr=args.lr_disc, weight_decay=args.w_decay)
         features = features.cuda()
         str_encodings = str_encodings.cuda()
         edges = edges.cuda()
@@ -78,15 +78,15 @@ def main(args):
         for epoch in range(1, args.epochs + 1):
 
             for _ in range(args.cl_rounds):
-                cl_loss = train_cl(cl_model, discriminator, optimizer_cl, features, str_encodings, edges, adj, adj_two_order)
+                cl_loss = train_cl(cl_model, edge_separator, optimizer_cl, features, str_encodings, edges, adj, adj_two_order)
                 
-            rank_loss = train_discriminator(cl_model, discriminator, optimizer_discriminator, features, str_encodings, edges, adj, adj_two_order, args)
+            rank_loss = train_edge_separator(cl_model, edge_separator, optimizer_edge_separator, features, str_encodings, edges, adj, adj_two_order, args)
             print("[TRAIN] Epoch:{:04d} | CL Loss {:.4f} | RANK loss:{:.4f} ".format(epoch, cl_loss, rank_loss))
 
             if epoch % args.eval_freq == 0:
                 cl_model.eval()
-                discriminator.eval()
-                adj_1, adj_2, _, _, _ = discriminator(torch.cat((features, str_encodings), 1), edges, adj, adj_two_order)
+                edge_separator.eval()
+                adj_1, adj_2, _, _, _ = edge_separator(torch.cat((features, str_encodings), 1), edges, adj, adj_two_order)
                 embedding = cl_model.get_embedding(features, adj_1, adj_2)
                 cur_split = 0 if (train_mask.shape[1]==1) else (trial % train_mask.shape[1])
                 acc_test, acc_val = eval_test_mode(embedding, labels, train_mask[:, cur_split],
@@ -109,12 +109,13 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('-dataset', type=str, default='cornell',
                         choices=['cora', 'citeseer', 'pubmed', 'chameleon', 'squirrel', 'actor', 'cornell',
-                                 'texas', 'wisconsin', 'computers', 'photo', 'cs', 'physics', 'wikics'])
+                                 'texas', 'wisconsin', 'computers', 'photo', 'cs', 'physics', 'wikics', 
+                                 'roman_empire', 'minesweeper', 'tolokers'])
     parser.add_argument('-ntrials', type=int, default=10)
     parser.add_argument('-sparse', type=int, default=0)
     parser.add_argument('-eval_freq', type=int, default=20)
     parser.add_argument('-epochs', type=int, default=400)
-    parser.add_argument('-lr_gcl', type=float, default=0.001)
+    parser.add_argument('-lr_dc_contrastive', type=float, default=0.001)
     parser.add_argument('-lr_disc', type=float, default=0.001)
     parser.add_argument('-cl_rounds', type=int, default=2)
     parser.add_argument('-w_decay', type=float, default=0.0)
